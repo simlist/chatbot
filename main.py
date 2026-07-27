@@ -7,6 +7,7 @@ from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_core.vectorstores import InMemoryVectorStore
+from langchain_core.output_parsers import StrOutputParser
 from pypdf import PdfReader
 
 
@@ -148,9 +149,11 @@ def main():
             break
         print('Getting relevant documents from vector store...')
         context = join_docs(retriever.invoke(user_input))
-        prompt = prompt_template.format_prompt(context=context, question=user_input)
-        chain = prompt | llm
-        for chunk in chain.stream():
+        # prompt = prompt_template.format_prompt(context=context, question=user_input)
+        context = {'context': context, 'question': user_input}
+        parser = StrOutputParser()
+        chain = prompt_template | llm | parser
+        for chunk in chain.stream(context):
             print(chunk, end='', flush=True)
         # print(f"Answer: {response.content}")
 
