@@ -11,19 +11,23 @@ from langchain_core.output_parsers import StrOutputParser
 from pypdf import PdfReader
 
 
+# Load environment variables from .env file
+# There must be an Google api key named GOOGLE_API_KEY in the .env file.
 load_dotenv()
 
-OPENAPI_KEY = getenv("OPENAI_API_KEY")
-GENAI_API_KEY = getenv("GENAI_API_KEY")
 
 def load_pdf(file_path: str) -> list[Document]:
     """Create Documents objects for each page in the PDF file.
 
-    Parameters:
-        file_path (str): Path to the PDF file.
+    Parameters
+    ----------
+    file_path : str
+        Path to the PDF file.
 
-    Returns:
-        List[Document]: A list of Document objects, one for each page in the PDF.
+    Returns
+    -------
+    List[Document]
+        A list of Document objects, one for each page in the PDF.
     """
     pdf_reader = PdfReader(file_path)
     documents = [
@@ -43,13 +47,19 @@ def chunk_documents(
     ) -> list[Document]:
     """Chunk the documents into smaller pieces.
 
-    Parameters:
-        documents (list[Document]): List of Document objects to be chunked.
-        chunk_size (int): The maximum size of each chunk in characters.
-        chunk_overlap (int): The number of characters to overlap between chunks.
+    Parameters
+    ----------
+    documents : list[Document]
+        List of Document objects to be chunked.
+    chunk_size : int
+        The maximum size of each chunk in characters.
+    chunk_overlap: int
+        The number of characters to overlap between chunks.
 
-    Returns:
-        list[Document]: A list of chunked Document objects.
+    Returns
+    -------
+    list[Document]
+        A list of chunked Document objects.
     """
     text_splitter = RecursiveCharacterTextSplitter(
         chunk_size=chunk_size,
@@ -59,16 +69,18 @@ def chunk_documents(
     return text_splitter.split_documents(documents)
 
 
-def initialize_vectorstore(
-    documents: list[Document],
-) -> InMemoryVectorStore:
+def initialize_vectorstore(documents: list[Document]) -> InMemoryVectorStore:
     """Initialize the vector store with embeddings from the PDF document.
 
-    Parameters:
-        documents (list[Document]): List of Document objects to be added to the vector store.
+    Parameters
+    ----------
+    documents: list[Document]
+        List of Document objects to be added to the vector store.
 
-    Returns:
-        InMemoryVectorStore: An instance of InMemoryVectorStore containing the document embeddings.
+    Returns
+    -------
+    InMemoryVectorStore
+        An instance of InMemoryVectorStore containing the document embeddings.
     """
     embeddings = HuggingFaceEmbeddings(
         model_name='sentence-transformers/all-mpnet-base-v2',
@@ -79,83 +91,99 @@ def initialize_vectorstore(
     return vectorstore
 
 
-def query_vectorstore(
-    query: str,
-    vectorstore: InMemoryVectorStore,
-)-> list[Document]:
-    """Query the vector store for relevant documents.
-
-    Parameters:
-        query (str): The query string to search for.
-        vectorstore (InMemoryVectorStore): The vector store to query.
-
-    Returns:
-        list[Document]: A list of Document objects that are relevant to the query.
-    """
-    return vectorstore.similarity_search(query, k=3)
-
 def join_docs(docs: list[Document]) -> str:
     """Join the content of multiple Document objects into a single string.
 
-    Parameters:
-        docs (list[Document]): List of Document objects to be joined.
+    Parameters
+    ----------
+    docs : list[Document]
+        List of Document objects to be joined.
 
-    Returns:
-        str: A single string containing the concatenated content of all documents.
+    Returns
+    -------
+    str
+        A single string containing the concatenated content of all
+        documents.
     """
     return '\n\n'.join(doc.page_content for doc in docs)
 
-prompt_template = ChatPromptTemplate.from_messages([
+
+# The template to 
+PROMPT_TEMPLATE = ChatPromptTemplate.from_messages([
     (
         'system',
-        "You are a helpful assistant that answers questions based on the provided documents. If the answer is not contained within the documents, respond with \"I don't know.\""
+        'You are a helpful FAQ chatbot that answers questions based on the provided manual. If the answer is not contained within the documents, respond with "I don\'t know."'
     ),
     (
         'human',
-        """Answer the question base only on the following context:
+        """Answer the question based only on the following context:
 
         {context}
 
 
-        Question: {question}
+        Question:
+        
+        {question}
 
         Provide a detailed answer:
         """
     )
 ])
+
+
 def main():
+    """Program runner"""
+    # Setting up data
     print('Loading PDF...')
     pages = load_pdf('./resources/fridge manual.pdf')
     print(f'Loaded PDF with {len(pages)} pages.')
+    # Break up pages into smaller chunks
     chunked_pages = chunk_documents(pages)
     print(f'Chunked PDF into {len(chunked_pages)} chunks.')
     print('Initializing vector store...')
-    retriever = initialize_vectorstore(chunked_pages).as_retriever(search_kwargs={'k': 3})
+    retriever = (
+        initialize_vectorstore(chunked_pages)
+        .as_retriever(search_kwargs={'k': 3})
+    )
     print('Vector store initialized.')
-    print('Initializing agent...')
 
+    print('Initializing agent...')
     llm = ChatGoogleGenerativeAI(
         model='gemini-3.6-flash',
         streaming=True,
     )
     print('Agent initialized.')
+
+    # Main program loop
     while True:
-        user_input = ''
-        user_input = input('Type your query or type "q" to exit: ')
+        user_input = input('Type your question or type "q" to exit: ')
+
+        # If input was empty, restart loop
         if not user_input:
             continue
+
         if (user_input.lower() == 'q'):
             print('Exiting...')
             break
-        print('Getting relevant documents from vector store...')
-        context = join_docs(retriever.invoke(user_input))
-        # prompt = prompt_template.format_prompt(context=context, question=user_input)
-        context = {'context': context, 'question': user_input}
+
+        print('Searchin vector store for relevant information...')
+        docs_string = join_docs(retriever.invoke(user_input))
+        context = {'context': docs_string, 'question': user_input}
         parser = StrOutputParser()
-        chain = prompt_template | llm | parser
+
+        # Create langchain pipeline
+        chain = PROMPT_TEMPLATE | llm | parser
+
+        
+        # Print generated text to the terminal as it's generated
         for chunk in chain.stream(context):
             print(chunk, end='', flush=True)
-        # print(f"Answer: {response.content}")
+
+        # Print new line after content
+        print('\n')
+        user_input = input('Press "Enter" to continue or "q" to quit: ')
+        if user_input.lower() == 'q':
+            break
 
 
 if __name__ == '__main__':
