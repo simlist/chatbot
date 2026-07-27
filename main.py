@@ -1,5 +1,5 @@
 from dotenv import load_dotenv
-from os import getenv
+import sys
 
 from langchain_core.documents import Document
 from langchain_core.prompts import ChatPromptTemplate
@@ -135,7 +135,11 @@ def main():
     """Program runner"""
     # Setting up data
     print('Loading PDF...')
-    pages = load_pdf('./resources/fridge manual.pdf')
+    try:
+        pages = load_pdf('./resources/fridge manual.pdf')
+    except FileNotFoundError:
+        print('Could not find the data file.', '\n', 'Exiting program.')
+        sys.exit()
     print(f'Loaded PDF with {len(pages)} pages.')
     # Break up pages into smaller chunks
     chunked_pages = chunk_documents(pages)
